@@ -5,7 +5,7 @@ import torch
 def _get_kgrid(size, L_sub, device):
     """
     size  : (Nx, Ny, Nz)
-    L_sub : tamaño físico de la subcaja en [Mpc/h]
+    L_sub : size of the subbox in [Mpc/h]
     """
     Nx, Ny, Nz = size
     dx = L_sub / Nx
@@ -33,32 +33,32 @@ def power_spectrum_loss(eul_out, eul_tgt,
                         eps=1e-6):
     """
     eul_out, eul_tgt : (B, C, Nx, Ny, Nz)
-    L_sub            : tamaño de la subcaja [Mpc/h]
-    kmin             : solo penalizamos k >= kmin (en h/Mpc)
-    alpha            : peso ~ (k/k_nyq)**alpha
+    L_sub            : size of the subbox in [Mpc/h]
+    kmin             : only penalize k >= kmin (in h/Mpc)
+    alpha            : weight ~ (k/k_nyq)**alpha
     """
     device = eul_out.device
     _, _, Nx, Ny, Nz = eul_out.shape
     kgrid = _get_kgrid((Nx, Ny, Nz), L_sub, device)   # (1,1,Nx,Ny,Nz)
 
-    # 1) quitar modo k=0 (densidad media)
+    # 1) remove mode k=0 (density mean)
     pred = eul_out - eul_out.mean(dim=(-3, -2, -1), keepdim=True)
     tgt  = eul_tgt  - eul_tgt.mean(dim=(-3, -2, -1), keepdim=True)
 
-    # 2) FFT 3D
+    # 2) 3D FFT
     pred_k = torch.fft.fftn(pred, dim=(-3, -2, -1))
     tgt_k  = torch.fft.fftn(tgt,  dim=(-3, -2, -1))
 
-    # 3) potencia por modo
+    # 3) power spectrum per mode
     P_pred = pred_k.abs()**2
     P_tgt  = tgt_k.abs()**2
 
-    # 4) comparar en log P
+    # 4) compare in log P
     logP_pred = torch.log(P_pred + eps)
     logP_tgt  = torch.log(P_tgt  + eps)
     diff = logP_pred - logP_tgt   # (B,C,Nx,Ny,Nz)
 
-    # 5) pesos en función de k
+    # 5) weights as a function of k
     k_mag = kgrid
     k_nyq = k_mag.max().clamp(min=eps)
     w = (k_mag / k_nyq)**alpha

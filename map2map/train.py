@@ -320,9 +320,6 @@ def train(epoch, loader, model, criterion,
         )
 
 
-
-
-
         ################
         # NOTE Lambda 3
         ################ 
@@ -433,9 +430,9 @@ def validate(epoch, loader, model, criterion, logger, device, args):
             grad_loss = gradient_loss(lag_out, lag_tgt)
             spec_loss = power_spectrum_loss(
                 eul_out, eul_tgt,
-                L_sub=args.L_sub,          # tamaño físico de la subcaja
-                kmin=args.spec_kmin,       # k mínimo para penalizar (high-k focus)
-                alpha=args.spec_alpha,     # fuerza con la que sube el peso en k
+                L_sub=args.L_sub,          # size of the subbox
+                kmin=args.spec_kmin,       # k minimum to penalize
+                alpha=args.spec_alpha,     # weight as a function of k
             )
 
             ################
@@ -479,14 +476,6 @@ def validate(epoch, loader, model, criterion, logger, device, args):
                         **args.misc_kwargs)
         logger.add_figure('fig/val/power/lag', fig, global_step=epoch+1)
         fig.clf()
-
-        #fig = plt_power(1.0,
-        #    dis=[input, lag_out, lag_tgt],
-        #    label=['in', 'out', 'tgt'],
-        #    **args.misc_kwargs,
-        #)
-        #logger.add_figure('fig/val/power/eul', fig, global_step=epoch+1)
-        #fig.clf()
 
     return epoch_loss
 

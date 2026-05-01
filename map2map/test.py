@@ -61,7 +61,7 @@ def test(args):
 
     in_chan, out_chan = test_dataset.in_chan, test_dataset.tgt_chan
 
-    # --- Modelo ---
+    # --- Model ---
     model = import_attr(args.model, models, callback_at=args.callback_at)
     model = model(sum(in_chan), sum(out_chan),
                   scale_factor=args.scale_factor, **args.misc_kwargs)
@@ -71,11 +71,11 @@ def test(args):
                             callback_at=args.callback_at)()
     criterion.to(device)
 
-    # --- Cargar checkpoint ---
+    # --- Load checkpoint ---
     state = torch.load(args.load_state, map_location=device)
     load_model_state_dict(model, state['model'], strict=args.load_state_strict)
     epoch_loaded = state.get('epoch', 'unknown')
-    print(f'✅ Modelo cargado desde {args.load_state} (epoch {epoch_loaded})')
+    print(f'✅ Model loaded from {args.load_state} (epoch {epoch_loaded})')
     del state
 
     suffix = f'_state{epoch_loaded}'
@@ -102,7 +102,7 @@ def test(args):
             print(f"📦 Sample {i} | Lag loss: {lag_loss.item():.3e} | "
                   f"Eul loss: {eul_loss.item():.3e} | Total: {loss.item():.3e}")
 
-            # --- Desnormalizar (output y target) ---
+            # --- Denormalize output and target ---
             if args.tgt_norms is not None:
                 start = 0
                 for norm, stop in zip(test_dataset.tgt_norms, np.cumsum(out_chan)):
@@ -110,5 +110,5 @@ def test(args):
                     norm(output[:, start:stop], undo=True, **args.misc_kwargs)
                     norm(target[:, start:stop], undo=True, **args.misc_kwargs)
                     start = stop
-            # --- Ensamblar salida si se requiere ---
+            # --- Assemble output if needed ---
             test_dataset.assemble(f'_out{suffix}', out_chan, output, data['target_relpath'])
