@@ -1,237 +1,230 @@
 # MG-NECOLA
 
-**MG-NECOLA** is a field-level deep-learning emulator for modified gravity cosmologies. It upgrades fast approximate **MG-PICOLA** simulations to near **QUIJOTE-MG N-body** accuracy using a V-Net convolutional neural network.
+**MG-NECOLA** is a field-level deep-learning emulator for modified gravity cosmologies. It upgrades fast approximate **MG-PICOLA** simulations to near **QUIJOTE-MG N-body** accuracy using a 3D V-Net convolutional neural network, achieving a total speed-up of ~1500× relative to full N-body runs.
 
-This repository is a fork and extension of [`map2map`](https://github.com/eelregit/map2map), adapted for **Hu-Sawicki f(R) gravity**, massive-neutrino generalization tests, and physics-driven loss functions for large-scale structure reconstruction.
+This repository is a fork and extension of [`map2map`](https://github.com/eelregit/map2map), adapted for **Hu-Sawicki f(R) gravity**, massive-neutrino generalization tests, and a physics-driven composite loss function for large-scale structure reconstruction.
 
-Paper:
+**Paper:**
 
-**MG-NECOLA: A Field-Level Emulator for f(R) Gravity and Massive Neutrino Cosmologies**  
-J. Bayron Orjuela-Quintana, Mauricio Reyes, Elena Giusarma, Marco Baldi, Neerav Kaushal, and César A. Valenzuela-Toledo  
-[arXiv:2604.19613](https://arxiv.org/abs/2604.19613)
+> **MG-NECOLA: A Field-Level Emulator for f(R) Gravity and Massive Neutrino Cosmologies**  
+> J. Bayron Orjuela-Quintana, Mauricio Reyes, Elena Giusarma, Marco Baldi, Neerav Kaushal, and César A. Valenzuela-Toledo  
+> [arXiv:2604.19613](https://arxiv.org/abs/2604.19613)
+
+---
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Physical Motivation](#physical-motivation)
+- [Key Results](#key-results)
+- [Data](#data)
+- [Model Architecture](#model-architecture)
+- [Loss Function](#loss-function)
+- [Repository Structure](#repository-structure)
+- [Installation](#installation)
+- [Training](#training)
+- [Evaluation](#evaluation)
+- [Computational Efficiency](#computational-efficiency)
+- [Known Limitations](#known-limitations)
+- [Relation to map2map and NECOLA](#relation-to-map2map-and-necola)
+- [Citation](#citation)
 
 ---
 
 ## Overview
 
-High-resolution N-body simulations provide accurate predictions for non-linear structure formation, but they are computationally expensive for the large simulation ensembles required in modified gravity analyses.
+High-resolution N-body simulations provide accurate predictions for non-linear structure formation, but are computationally prohibitive for the large ensembles required in modified gravity (MG) analyses. MG-NECOLA bridges this gap by learning a **field-level residual correction**:
 
-MG-NECOLA bridges this gap by learning a field-level correction:
-
-```text
-MG-PICOLA  -->  QUIJOTE-MG-like N-body output
+```
+MG-PICOLA  ──[V-Net]──►  QUIJOTE-MG-like N-body output
 ```
 
-Instead of generating cosmological fields from scratch, the network acts as a **residual corrector**. It takes approximate MG-PICOLA displacement fields as input and predicts the residual displacement needed to match the high-fidelity QUIJOTE-MG simulation.
+Instead of generating cosmological fields from scratch, the network acts as a **residual corrector**. It takes approximate MG-PICOLA displacement fields as input and predicts the residual needed to match high-fidelity QUIJOTE-MG simulations:
 
-The learned residual is
-
-```text
-Delta_res = Delta_QUIJOTE-MG - Delta_MG-PICOLA
+```
+Δ_res = Δ_QUIJOTE-MG − Δ_MG-PICOLA
 ```
 
-and the corrected displacement is obtained by adding this residual back to the MG-PICOLA input.
+The corrected displacement field is recovered by a global bypass connection:
+
+```
+Δ_corrected = Δ_MG-PICOLA + Δ_res
+```
 
 ---
 
-## Main Scientific Contributions
+## Physical Motivation
 
-MG-NECOLA introduces a field-level emulator for modified gravity simulations with the following key results:
+In **Hu-Sawicki f(R) gravity**, an additional scalar degree of freedom mediates a fifth force that enhances gravity in low-density regions while recovering General Relativity in high-density environments via the **chameleon screening mechanism**. On sub-horizon scales, this modifies the Poisson equation through a scale- and time-dependent effective gravitational coupling:
 
-- Upgrades fast MG-PICOLA simulations to near N-body fidelity.
-- Learns non-linear displacement residuals between MG-PICOLA and QUIJOTE-MG.
-- Uses a V-Net architecture based on the original `map2map` framework.
-- Extends the NECOLA/map2map approach from standard gravity to **Hu-Sawicki f(R) gravity**.
-- Adds a modified training objective with:
-  - Lagrangian displacement loss
-  - Eulerian density loss
-  - Gradient-matching loss
-  - Fourier-space spectral loss
-- Recovers the matter power spectrum and bispectrum with nearly sub-percent accuracy up to approximately `k ~ 1 h/Mpc`.
-- Reduces the mean particle displacement error by approximately 30% relative to MG-PICOLA.
-- Generalizes to cosmologies outside the training manifold.
-- Recovers the LCDM/GR limit without introducing spurious modified-gravity signals.
-- Captures massive-neutrino power suppression for `M_nu <= 0.4 eV`, despite being trained on massless-neutrino simulations.
-- Achieves a total speed-up of roughly `1500x` relative to full N-body simulations.
+```
+G_eff(k, a) / G_N = 1 + (1/3) * k² / (k² + a²m²(a))
+```
+
+Gravity is enhanced by 4/3 on scales smaller than the scalaron Compton wavelength, while GR is recovered on large scales. These scale-dependent, environment-dependent effects are particularly challenging for approximate solvers like COLA, which rely on Lagrangian perturbation theory and lack the force resolution to solve the non-linear scalar field equations accurately. MG-NECOLA is designed to correct these small-scale errors.
 
 ---
 
-## Physical Problem
+## Key Results
 
-Modified gravity models can alter the growth of cosmic structure through scale-dependent gravitational forces and screening mechanisms. These effects are especially important in the mildly non-linear and non-linear regimes, where approximate solvers such as COLA begin to lose accuracy.
+Evaluated on the QUIJOTE-MG test set (10 independent realizations per f(R) label):
 
-In Hu-Sawicki f(R) gravity, the scalar degree of freedom enhances gravity in low-density regions while recovering General Relativity in high-density regions through chameleon screening. This makes the problem difficult for approximate solvers and motivates a field-level neural correction.
+| Observable | MG-PICOLA error | MG-NECOLA error |
+|---|---|---|
+| Matter power spectrum P(k), k ≤ 1 h/Mpc | > 5% at k > 0.5 h/Mpc | **≲ 1%** |
+| Bispectrum B(k₁, k₂, θ) | significant bias | **sub-percent** |
+| Mean particle displacement ⟨δr⟩ | ~0.68 h⁻¹ Mpc | **~0.47 h⁻¹ Mpc (~30% improvement)** |
 
-MG-NECOLA uses the speed of MG-PICOLA while correcting its small-scale errors using a neural emulator trained against QUIJOTE-MG.
+**Generalization tests (out-of-training-manifold):**
+
+- Interpolation across scalar field strengths |fR0| ∈ [10⁻⁷, 10⁻⁴]: error < 1% up to k ~ 1 h/Mpc
+- Latin hypercube (98 cosmologies, 6D parameter space {Ωm, Ωb, h, ns, σ8, fR0}): near-unity mean T(k) with tight 1σ variance
+- ΛCDM limit (fR0 = 0): sub-percent recovery with **no spurious MG signal**
+- Massive neutrinos (Mν = 0.1, 0.2, 0.4 eV), trained on massless: accurate suppression recovery up to Mν ≤ 0.4 eV
 
 ---
 
 ## Data
 
-The model is trained on paired simulations:
+The model is trained on **100 paired simulations** from the fixed-cosmology QUIJOTE-MG suite, matching MG-PICOLA approximate runs to QUIJOTE-MG N-body targets particle-by-particle.
 
-- **Input:** MG-PICOLA approximate simulations
-- **Target:** QUIJOTE-MG high-fidelity N-body simulations
-
-The paper uses the fixed-cosmology subset of QUIJOTE-MG for Hu-Sawicki f(R) gravity. Four scalar-field amplitudes are considered:
-
-```text
-fR0 = -5e-7, -5e-6, -5e-5, -5e-4
+**Fixed cosmology:**
+```
+Ωm = 0.3175,  Ωb = 0.049,  h = 0.6711,  ns = 0.9624,  σ8 = 0.834,  Mν = 0
 ```
 
-For training, the dataset contains 100 paired simulations:
-
-```text
-25 simulations per f(R) label x 4 labels = 100 simulations
+**f(R) labels:**
+```
+fR0 = {-5×10⁻⁷, -5×10⁻⁶, -5×10⁻⁵, -5×10⁻⁴}   (25 simulations each)
 ```
 
-The simulations are split as:
+**Simulation specs:** 512³ CDM particles, box size L = 1000 h⁻¹ Mpc, evolved from z = 127 to z = 0.
 
-```text
-70% training
-20% validation
-10% testing
+**Data split:**
+```
+70 simulations  →  training
+20 simulations  →  validation
+10 simulations  →  testing
 ```
 
-The full displacement fields have shape:
-
-```text
-3 x 512^3
-```
-
-where the three channels correspond to the three Cartesian components of the displacement field.
-
-During training, fields are decomposed into cubic sub-volumes:
-
-```text
-3 x 128^3
-```
-
-corresponding to sub-boxes of size approximately:
-
-```text
-250 Mpc/h per side
-```
-
-Each sub-volume is periodically padded by 20 voxels before entering the network.
+**Field layout:** Each full displacement field has shape `3 × 512³` (three Cartesian components). During training, fields are tiled into cubic sub-volumes of size `3 × 128³` (~250 h⁻¹ Mpc per side), periodically padded by 20 voxels before entering the network.
 
 ---
 
 ## Model Architecture
 
-MG-NECOLA uses a 3D V-Net architecture inherited from the `map2map` framework.
+MG-NECOLA uses the **3D V-Net** architecture from `map2map` (`models/vnet.py`), implementing a symmetric encoder–decoder (U-shaped) design with residual and skip connections at multiple resolutions.
 
-The architecture is an encoder-decoder network with:
-
-- Two down-sampling stages
-- Two up-sampling stages
-- Residual connections
-- Skip connections
-- 3D convolutional layers
-- Batch normalization
-- Leaky ReLU activations
-- Three input channels for the displacement components
-- Three output channels for the predicted residual displacement components
-
-The model receives padded input sub-volumes and outputs a corrected residual displacement field of size:
-
-```text
-3 x 128^3
 ```
-
-The final corrected field is obtained through a global residual connection:
-
-```text
-Delta_corrected = Delta_MG-PICOLA + Delta_res
+Input: 3 × 168³  (128³ sub-volume + 20 voxel periodic padding)
+         │
+    [Contracting block 1]  ── 3³ convs + residual ──►  166³ → 164³
+         │ (stride-2 2³ conv)
+         ▼ 82³
+    [Contracting block 2]  ── 3³ convs + residual ──►  80³ → 78³
+         │ (stride-2 2³ conv)
+         ▼ 39³ (bottleneck)
+    [Expansive block 1]    ── transposed conv ──►  70³
+         │ + skip connection (crop + concat)
+    [Expansive block 2]    ── transposed conv ──►  128³
+         │
+Output: 3 × 128³  (predicted residual displacement Δ_res)
 ```
-
----
 
 ## Loss Function
 
-The training objective combines real-space and Fourier-space constraints.
+The training objective combines real-space and Fourier-space constraints:
 
-The real-space baseline loss is
-
-```text
-L_base = lambda_lag * L_lag + lambda_eul * L_eul + lambda_grad * L_grad
+```
+L = λ_lag · L_lag  +  λ_eul · L_eul  +  λ_grad · L_grad  +  λ_spec · L_spec
 ```
 
-where:
+| Term | Description |
+|---|---|
+| `L_lag` | RMSE of predicted vs. target **Lagrangian displacement field** |
+| `L_eul` | RMSE of predicted vs. target **Eulerian overdensity** (mapped via `models/lag2eul.py`) |
+| `L_grad` | Gradient-matching penalty — regularizes displacement predictions, preventing over-smoothing and recovering small-scale MG features |
+| `L_spec` | Fourier-space power-spectrum loss, weighted as `w(k) = (k/k_Ny)^(2α) Θ(k − k_min)` to focus on non-linear scales |
 
-- `L_lag` is the Lagrangian displacement loss.
-- `L_eul` is the Eulerian overdensity loss obtained after mapping displacements to density.
-- `L_grad` is a gradient-matching penalty that improves small-scale displacement structure.
-
-A spectral loss is also included:
-
-```text
-L_spec = < w(k) [log P_pred(k) - log P_targ(k)]^2 >
+The spectral loss is:
+```
+L_spec = ⟨ w(k) [log P_pred(k) − log P_targ(k)]² ⟩
 ```
 
-This term focuses on high-k modes above
-
-```text
-k_min = 0.3 h/Mpc
+**Default weights (from paper ablation study):**
 ```
+λ_lag  = 1.0
+λ_eul  = 3.0
+λ_grad = 2.0
+λ_spec = 1.0
 
-The total loss used in this code is
-
-```text
-L_total = lambda_lag * L_lag
-        + lambda_eul * L_eul
-        + lambda_grad * L_grad
-        + lambda_spec * L_spec
-```
-
-The default weights used in the provided training script are:
-
-```text
-lambda_lag  = 1.0
-lambda_eul  = 3.0
-lambda_grad = 2.0
-lambda_spec = 1.0
-```
-
-The spectral loss uses:
-
-```text
-spec_kmin  = 0.3
+spec_kmin  = 0.3 h/Mpc   (onset of mildly non-linear regime)
 spec_alpha = 2.0
-L_sub      = 250.0
+L_sub      = 250.0 h⁻¹ Mpc
 ```
+
+The gradient term `L_grad` was identified as critical in the ablation study: removing it causes errors 2–2.5× larger in the non-linear regime (k > 0.5 h/Mpc) and breaks sub-percent accuracy. This is the principal departure from the original NECOLA loss.
 
 ---
 
 ## Repository Structure
 
-```text
-.
-├── m2m.py                  # Main map2map command-line interface
-├── train.py                # Training loop with MG-NECOLA loss terms
-├── test.py                 # Evaluation / inference routine
-├── fields.py               # Dataset and field-loading utilities
-├── gradient_loss.py        # Gradient-matching loss
-├── spectral_loss.py        # Fourier-space power-spectrum loss
-├── train_slurm.sh          # SLURM training script
-├── models/                 # Neural-network architectures
-├── data/                   # Dataset utilities
-└── README.md
+The code lives inside the `map2map/` Python package. Only the most relevant files are highlighted; auxiliary modules inherited from upstream `map2map` (GAN utilities, alternative architectures, plotting helpers, etc.) are kept but not used by the MG-NECOLA pipeline.
+
 ```
+map2map/
+├── data/             # Dataset, distributed sampler, field normalizations
+│   ├── fields.py     # FieldDataset: file globbing, cropping, padding, augmentation
+│   ├── sampler.py    # DistFieldSampler for multi-GPU training
+│   └── norms/        # Per-field normalization callbacks (e.g. cosmology.dis)
+│
+├── models/           # Network architectures and physics ops
+│   ├── vnet.py       # ★ V-Net used by MG-NECOLA
+│   ├── lag2eul.py    # Lagrangian → Eulerian density mapping (used in L_eul)
+│   ├── power.py      # Power-spectrum utilities (diagnostics and L_spec)
+│   ├── narrow.py     # Cropping for skip connections
+│   └── ...           # Conv blocks, U-Net, GAN modules (unused here)
+│
+├── utils/            # gradient_loss, power_spectrum_loss, checkpoint I/O,
+│                     #   plotting, dynamic attribute import
+│
+├── train.py          # ★ Training loop — DDP, composite loss, TensorBoard logging
+├── test.py           # Evaluation / inference routine
+├── main.py           # Top-level dispatch (train / test subcommands)
+├── args.py           # Argument parser (all --lambda-*, --spec-*, --L-sub flags)
+└── __init__.py
+```
+
+The two files most relevant to this fork are **`train.py`** (composite loss assembly and DDP loop) and **`models/vnet.py`** (the V-Net architecture). Dataset and augmentation logic in `data/fields.py` is inherited from upstream `map2map` with no MG-specific changes.
+
+### What `train.py` does
+
+`train.py` orchestrates multi-GPU distributed training:
+
+1. **Spawn**: `node_worker` → `gpu_worker` spawns one process per GPU (`torch.multiprocessing.spawn`), pinning each to its own device with `torch.cuda.set_device`.
+2. **Distributed init**: NCCL process group via `dist_init`, with global rank computed from `SLURM_NODEID` for multi-node compatibility.
+3. **Data**: builds `FieldDataset` + `DistFieldSampler` for both train and validation, with periodic-padding crops of size 128³.
+4. **Model**: instantiates the V-Net (`models.vnet.VNet`), wraps in `DistributedDataParallel`, and optionally restores from `checkpoint.pt`.
+5. **Loss assembly** (per batch):
+   - Lagrangian RMSE on raw displacement,
+   - Eulerian RMSE after `lag2eul` projection,
+   - `gradient_loss` on displacements,
+   - `power_spectrum_loss` with `kmin`, `alpha`, `L_sub`,
+   - combined with the four `λ_*` weights from `args.py`.
+6. **Logging**: per-batch and per-epoch losses, gradient norms (first/last layer), field slices, and power spectra written to TensorBoard from rank 0.
+7. **Scheduling**: `ReduceLROnPlateau` halves the learning rate after `patience` epochs without validation improvement.
 
 ---
 
 ## Installation
 
 Clone the repository:
-
 ```bash
 git clone https://github.com/BayronO/MG-NECOLA.git
 cd MG-NECOLA
 ```
 
-Create or activate your Python environment. On the Michigan Tech cluster, the training script uses:
-
+**Michigan Tech cluster:**
 ```bash
 module use /mnt/it_software/easybuild/modules/all
 module load Anaconda3/2022.10
@@ -240,48 +233,36 @@ source ~/.bashrc
 conda activate pylians
 ```
 
-Install the required dependencies according to your local environment. The code requires PyTorch, NumPy, Matplotlib, and the dependencies inherited from `map2map`.
+**Dependencies:** PyTorch (with CUDA), NumPy, Matplotlib, TensorBoard, and the `map2map` dependencies. Install according to your local environment.
 
 ---
 
 ## Training
 
-Training is launched through the `m2m.py` interface inherited from `map2map`.
+Training is launched through the `m2m.py` CLI, which dispatches to `train.py`.
 
-### SLURM Training
-
-The recommended way to train on the GPU cluster is:
+### SLURM
 
 ```bash
 sbatch train_slurm.sh
 ```
 
-The provided SLURM script requests:
-
-```text
+The SLURM script requests:
+```
 partition:       mrigpu
 nodes:           1
-GPUs:            4
+GPUs:            4 (one process per GPU via torch.multiprocessing.spawn)
 CPUs per task:   16
-wall time:       30:00:00
 ```
 
-It sets the distributed training variables:
-
-```bash
-export MASTER_ADDR=127.0.0.1
-export MASTER_PORT=$(python -c "import socket; s=socket.socket(); s.bind(('', 0)); print(s.getsockname()[1]); s.close()")
-export WORLD_SIZE=$((SLURM_NNODES * 4))
-```
-
-The training command used in `train_slurm.sh` is:
+### Training command
 
 ```bash
 python m2m.py train \
-  --train-in-patterns "/path/to/train/in/*/cola_*.npy" \
+  --train-in-patterns  "/path/to/train/in/*/cola_*.npy" \
   --train-tgt-patterns "/path/to/train/tgt/*/quijote_*.npy" \
-  --val-in-patterns "/path/to/val/in/*/cola_*.npy" \
-  --val-tgt-patterns "/path/to/val/tgt/*/quijote_*.npy" \
+  --val-in-patterns    "/path/to/val/in/*/cola_*.npy" \
+  --val-tgt-patterns   "/path/to/val/tgt/*/quijote_*.npy" \
   --in-norms cosmology.dis --tgt-norms cosmology.dis \
   --augment --crop 128 --pad 20 \
   --model vnet.VNet --callback-at . \
@@ -289,162 +270,118 @@ python m2m.py train \
   --optimizer-args '{"betas": [0.9, 0.999], "weight_decay": 1e-4}' \
   --reduce-lr-on-plateau \
   --scheduler-args '{"factor": 0.5, "patience": 2, "threshold": 1e-3, "verbose": true}' \
-  --batches 2 --epochs 150 --loader-workers 4 \
+  --batches 2 --epochs 100 --loader-workers 4 \
   --div-data --div-shuffle-dist 1 \
   --L-sub 250.0 \
-  --lambda-lag 1.0 \
-  --lambda-eul 3.0 \
+  --lambda-lag  1.0 \
+  --lambda-eul  3.0 \
   --lambda-grad 2.0 \
   --lambda-spec 1.0 \
-  --spec-kmin 0.3 \
+  --spec-kmin  0.3 \
   --spec-alpha 2.0
 ```
 
-The input and target patterns follow the convention:
-
-```text
-cola_*.npy      -> MG-PICOLA approximate displacement fields
-quijote_*.npy   -> QUIJOTE-MG target displacement fields
+File naming convention:
+```
+cola_*.npy      →  MG-PICOLA approximate displacement fields  (input)
+quijote_*.npy   →  QUIJOTE-MG N-body displacement fields      (target)
 ```
 
----
+### Checkpoints and logs
 
-## Checkpoints
-
-During training, the code saves model states as:
-
-```text
-state_1.pt
-state_2.pt
-...
-state_N.pt
-```
-
-A symbolic link points to the latest checkpoint:
-
-```text
-state.pt
-```
-
-Training logs are written to:
-
-```text
-logs/%x-%j.out
-logs/%x-%j.err
-```
-
-where `%x` is the SLURM job name and `%j` is the job ID.
+Model states are saved as `state_1.pt`, `state_2.pt`, ..., with a symlink `checkpoint.pt` pointing to the latest. TensorBoard logs (loss curves, power spectra, field slices) are written to `runs/`.
 
 ---
 
 ## Evaluation
 
-The evaluation code loads a trained checkpoint and applies the model to test fields. The testing routine computes:
-
-- Lagrangian displacement loss
-- Eulerian density loss
-- Total diagnostic loss
-- Output fields assembled from model predictions
-
-A typical test call follows the same `map2map` interface style and should provide:
-
 ```bash
 python m2m.py test \
-  --test-in-patterns "/path/to/test/in/*/cola_*.npy" \
+  --test-in-patterns  "/path/to/test/in/*/cola_*.npy" \
   --test-tgt-patterns "/path/to/test/tgt/*/quijote_*.npy" \
   --in-norms cosmology.dis --tgt-norms cosmology.dis \
   --crop 128 --pad 20 \
   --model vnet.VNet --callback-at . \
-  --load-state state.pt
+  --load-state checkpoint.pt
 ```
 
-Adjust the paths and checkpoint name according to your trained model location.
+The test routine computes Lagrangian displacement loss, Eulerian density loss, total loss, and assembles output fields from patches.
 
 ---
 
-## Reported Results
+## Computational Efficiency
 
-According to the paper, MG-NECOLA achieves:
+| Method | Hardware | Time per realization | Speed-up vs. N-body |
+|---|---|---|---|
+| QUIJOTE-MG (N-body) | CPU | ~1.8 × 10⁶ s (~500 CPU-h) | 1× |
+| MG-PICOLA | CPU | ~1.0 × 10³ s | ~1800× |
+| **MG-NECOLA** (COLA + inference) | CPU + GPU | **~1.2 × 10³ s** | **~1500×** |
 
-- Nearly sub-percent accuracy in the matter power spectrum up to `k ~ 1 h/Mpc`.
-- Nearly sub-percent accuracy in the bispectrum for representative triangle configurations.
-- Approximately 30% reduction in the mean particle displacement error compared with MG-PICOLA.
-- Strong recovery of non-linear clustering lost by the approximate solver.
-- Stable generalization across intermediate scalar-field strengths.
-- Good performance across a broad Latin-hypercube parameter space.
-- Accurate recovery of the LCDM limit.
-- Accurate recovery of massive-neutrino suppression for `M_nu = 0.1, 0.2, 0.4 eV`.
-
-The total time-to-solution is approximately:
-
-```text
-QUIJOTE-MG N-body:  ~1.8 x 10^6 CPU seconds
-MG-PICOLA:          ~1.0 x 10^3 CPU seconds
-MG-NECOLA:          ~1.2 x 10^3 seconds including MG-PICOLA + inference
-```
-
-This corresponds to a total speed-up of approximately:
-
-```text
-~1500x relative to full N-body
-```
+Neural network inference alone takes ~180 seconds per realization on a single GPU. The total pipeline (MG-PICOLA + inference) remains ~1500× faster than full N-body, enabling generation of the large mock catalogs required for covariance matrix estimation in stage-IV galaxy surveys.
 
 ---
 
-## Known Limitation
+## Known Limitations
 
-MG-NECOLA is a residual correction model. Its performance depends on the quality of the approximate MG-PICOLA input.
+MG-NECOLA is a **residual corrector**: its performance is intrinsically tied to the quality of the MG-PICOLA input.
 
-In strongly coupled scenarios involving both modified gravity and massive neutrinos, the paper finds that MG-PICOLA can produce degraded displacement fields. In that case, MG-NECOLA still recovers a significant fraction of the missing power, but it cannot fully reconstruct the true N-body result when the baseline solver fails too severely.
+- In the **combined f(R) + massive neutrino** regime with high Mν (e.g., the Latin hypercube cases in Table 2 of the paper), MG-PICOLA itself breaks down, producing displacement fields that rapidly diverge from N-body truth even at mildly non-linear scales. In these cases, MG-NECOLA recovers a significant fraction of the missing power but cannot fully reconstruct the true N-body result.
+- Performance at **k > 1 h/Mpc** extends slightly beyond the simulation trust region (kNy ≈ 1.61 h/Mpc; reliable to ~1.1 h/Mpc) and should be interpreted with caution.
+- The model is trained on **fixed background cosmology**. Generalization to varying cosmologies (validated on a 6D Latin hypercube) maintains < 5% error, but accuracy degrades relative to the fixed-cosmology case.
 
 ---
 
-## Relation to map2map
+## Relation to map2map and NECOLA
 
-This repository builds on the original `map2map` codebase:
+This repository builds on [`map2map`](https://github.com/eelregit/map2map) and the original [NECOLA](https://arxiv.org/abs/2111.02422) framework (Kaushal et al. 2022). The principal extensions introduced in MG-NECOLA are:
 
-```text
-https://github.com/eelregit/map2map
-```
-
-The main extensions in this fork are:
-
-- Application to modified gravity simulations.
-- Pairing MG-PICOLA approximate fields with QUIJOTE-MG N-body targets.
-- Residual learning for displacement-field correction.
-- Gradient-matching loss for small-scale structure recovery.
-- Spectral loss for power-spectrum consistency.
-- SLURM-based multi-GPU training workflow.
-- Physics validation using matter power spectrum, bispectrum, displacement errors, and extrapolation tests.
+- Application to **Hu-Sawicki f(R) modified gravity** simulations.
+- Pairing MG-PICOLA approximate fields with QUIJOTE-MG N-body targets for residual learning.
+- **Composite loss function** replacing the NECOLA logarithmic product loss with an explicit gradient-matching term (`L_grad`) and a Fourier-space spectral term (`L_spec`).
+- Multi-GPU distributed training (`DistributedDataParallel`) via SLURM (in `train.py`).
+- Physics validation using matter power spectrum, bispectrum, displacement residuals, and out-of-distribution generalization tests.
 
 ---
 
 ## Citation
 
-If you use this repository, please cite:
+If you use this code, please cite the MG-NECOLA paper:
 
 ```bibtex
 @article{orjuelaquintana2026mgnecola,
-  title = {MG-NECOLA: A Field-Level Emulator for f(R) Gravity and Massive Neutrino Cosmologies},
-  author = {Orjuela-Quintana, J. Bayron and Reyes, Mauricio and Giusarma, Elena and Baldi, Marco and Kaushal, Neerav and Valenzuela-Toledo, Cesar A.},
+  title   = {MG-NECOLA: A Field-Level Emulator for f(R) Gravity and Massive Neutrino Cosmologies},
+  author  = {Orjuela-Quintana, J. Bayron and Reyes, Mauricio and Giusarma, Elena
+             and Baldi, Marco and Kaushal, Neerav and Valenzuela-Toledo, Cesar A.},
   journal = {arXiv e-prints},
-  year = {2026},
-  eprint = {2604.19613},
+  year    = {2026},
+  eprint  = {2604.19613},
   archivePrefix = {arXiv},
-  primaryClass = {astro-ph.CO}
+  primaryClass  = {astro-ph.CO}
 }
 ```
 
-Please also cite the original `map2map` work if you use this fork.
+Please also cite the original `map2map` work and NECOLA if you use this fork:
+
+```bibtex
+@article{kaushal2022necola,
+  title   = {NECOLA: Toward a Universal Field-level Cosmological Emulator},
+  author  = {Kaushal, Neerav and Villaescusa-Navarro, Francisco and Giusarma, Elena and others},
+  journal = {Astrophys. J.},
+  volume  = {930},
+  pages   = {115},
+  year    = {2022},
+  doi     = {10.3847/1538-4357/ac5c4a}
+}
+```
 
 ---
 
 ## Acknowledgements
 
-This code is based on `map2map`. The scientific application uses QUIJOTE-MG and MG-PICOLA simulations. The project acknowledges support from Michigan Technological University computing resources and collaborators involved in the MG-NECOLA paper.
+This project uses QUIJOTE-MG simulations (Baldi & Villaescusa-Navarro 2025) and MG-PICOLA (Wright et al. 2017; Winther et al. 2017) as baseline solver. The authors thank Francisco Villaescusa-Navarro for insightful discussions and the IT Department at Michigan Technological University for computing support.
 
 ---
 
 ## Status
 
-This is an active research repository. Interfaces, paths, and training scripts may change as the project evolves.
+This is an active research repository. Training scripts, interfaces, and paths may evolve as the project develops. Trained models, predictions, and extracted statistics from the test and extrapolation sets are hosted at [github.com/BayronO/MG-NECOLA](https://github.com/BayronO/MG-NECOLA).
